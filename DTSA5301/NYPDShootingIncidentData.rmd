@@ -1,0 +1,65 @@
+---
+title: "NYPD Shooting Incident Data"
+output: html_document
+date: "2022-08-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r getData, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+data <- read_csv(url_in)
+
+data <- data %>%
+  select(-c(INCIDENT_KEY, JURISDICTION_CODE, X_COORD_CD, Y_COORD_CD, Latitude, Longitude, Lon_Lat, PRECINCT, LOCATION_DESC, STATISTICAL_MURDER_FLAG, OCCUR_TIME)) %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+
+data <- data[order(data$OCCUR_DATE),]
+
+data
+
+summary(data)
+
+```
+
+## Visualization
+
+```{r plots1}
+
+df <- count(data, OCCUR_DATE)
+ggplot(df, aes(x=OCCUR_DATE, y=n)) + geom_point() + ggtitle("Shootings in NY from 2006-2021") +xlab("Date") + ylab("Number of Shootings")
+
+linMod = lm(n~OCCUR_DATE, data = df)
+summary(linMod)
+
+```
+
+As can be seen above, the number of shootings in NY steadily declined (minus some outliers) for years until 2020, where it has increased again.
+
+```{r plots2}
+
+dff <- count(data, BORO)
+ggplot(dff, aes(x=BORO, y=n)) + geom_bar(stat="identity") + ggtitle("Shootings from 2006-2021 by Borough") + xlab("New York Borough") + ylab("Total Number of Shootings")
+
+```
+
+Shootings occur far more frequently in Brooklyn or the Bronx, but relatively rarely in the other boroughs. 
+
+## Conclusion
+
+Overall, by looking at the graph and the linear model, one can see that there has been a general decrease in shootings in New York over the last decade and a half, even accounting for the uptick during 2020 and 2021. You can also see that there have been far more shootings in Brooklyn and the Bronx compared to Staten Island, Manhattan, and Queens.
+
+There are several possible ways bias could have affected the data and the way it is presented. By only focusing on shootings, we neglect other crimes occurring in the city. Is it possible that when shootings decrease, other crimes become more likely? Or does the decrease in shootings correspond to a decrease in all crime? Another obvious way bias affects the visualization of the data is in the summary of the shootings that occur in each borough. Shootings look especially extreme in the Bronx and Brooklyn, but we are only looking at the total number of shootings per borough. We aren't accounting for population size, levels of poverty, or other important factors. So it is possible that the differences between the boroughs and their shooting rates is not as extreme as it looks. 
+
+```{r conclusion}
+sessionInfo()
+```

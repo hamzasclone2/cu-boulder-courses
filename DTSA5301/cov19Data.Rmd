@@ -1,0 +1,140 @@
+---
+title: "Global COVID-19 Data"
+output: html_document
+date: "2022-08-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The Data
+
+We begin by getting and tidying the data. 
+
+```{r getData, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv")
+
+urls <- str_c(url_in, file_names)
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long), names_to = "date", values_to = "cases") %>%
+  select(-c(Lat,Long))
+
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long), names_to = "date", values_to = "deaths") %>%
+  select(-c(Lat,Long))
+
+global <- global_cases %>% full_join(global_deaths) %>% 
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+
+global <- global %>% filter(cases > 0)
+
+global <- global %>%
+  unite("Combined_Key", c(Province_State, Country_Region),
+        sep = ", ",
+        na.rm = TRUE,
+        remove = FALSE)
+
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+uid <- read_csv(uid_lookup_url) %>% select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+global <- global %>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>% select(-c(UID, FIPS)) %>% select(Province_State, Country_Region, date, cases, deaths, Population, Combined_Key)
+
+global
+
+summary(global)
+
+```
+
+Above we can see a snapshot of the data for some countries as well as a summary of all the data.
+
+```{r country}
+global_by_country <- global %>% group_by(Province_State, Country_Region, date) %>% summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>% mutate(deaths_per_mill = deaths *1000000 / Population) %>% select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>% ungroup()
+
+global_by_country
+
+```
+
+Here we've rearranged the data so that it's organized by country.
+
+```{r countrytotals}
+global_country_totals <- global_by_country %>% 
+  group_by(Country_Region) %>%
+  summarize(deaths = max(deaths), cases = max(cases), population = max(Population), cases_per_thou = 1000*cases / population, deaths_per_thou = 1000*deaths / population) %>% filter(cases>0, population>0)
+
+global_country_totals %>% slice_min(deaths_per_thou, n = 10)
+```
+
+Above you can see the countries that have the fewest deaths per thousand.
+
+```{r maxdeaths}
+global_country_totals %>% slice_max(deaths_per_thou, n = 10)
+```
+
+And here you can see the countries that have the most deaths per thousand.
+
+## Visualization
+```{r visualization}
+country <- "Pakistan"
+global_by_country %>% filter(Country_Region == country) %>% filter(cases > 0) %>% ggplot(aes(x=date, y=cases)) + geom_line(aes(color="cases")) + geom_point(aes(color ="cases")) + geom_line(aes(y= deaths, color="deaths")) + geom_point(aes(y=deaths, color="deaths")) + scale_y_log10() + theme(legend.position="bottom", axis.text.x = element_text(angle = 90)) + labs(title = str_c("COVID19 in ", country), y=NULL)
+
+country <- "India"
+global_by_country %>% filter(Country_Region == country) %>% filter(cases > 0) %>% ggplot(aes(x=date, y=cases)) + geom_line(aes(color="cases")) + geom_point(aes(color ="cases")) + geom_line(aes(y= deaths, color="deaths")) + geom_point(aes(y=deaths, color="deaths")) + scale_y_log10() + theme(legend.position="bottom", axis.text.x = element_text(angle = 90)) + labs(title = str_c("COVID19 in ", country), y=NULL)
+
+country <- "Bangladesh"
+global_by_country %>% filter(Country_Region == country) %>% filter(cases > 0) %>% ggplot(aes(x=date, y=cases)) + geom_line(aes(color="cases")) + geom_point(aes(color ="cases")) + geom_line(aes(y= deaths, color="deaths")) + geom_point(aes(y=deaths, color="deaths")) + scale_y_log10() + theme(legend.position="bottom", axis.text.x = element_text(angle = 90)) + labs(title = str_c("COVID19 in ", country), y=NULL)
+```
+
+Above, we can see the cases and deaths for 3 South Asian countries. There are some similarities between the three, but it can also be seen that each of their responses to the pandemic occurred at different times. 
+
+## Modeling
+
+```{r model}
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = global_country_totals)
+
+summary(mod)
+```
+
+Above is the equation for the linear model of deaths per thousand as compared to cases per thousand.
+
+```{r pred}
+global_total_w_pred <- global_country_totals %>% mutate(pred = predict(mod))
+
+global_total_w_pred
+```
+
+Then we can see the predicted values next to the actual values.
+
+
+```{r lm}
+global_total_w_pred %>% ggplot() + geom_point(aes(x=cases_per_thou, y=deaths_per_thou), color="blue") + geom_point(aes(x=cases_per_thou, y = pred), color="red")
+
+```
+
+Finally, we can see how our linear model compares to the actual data. The model is able to correctly predict that there are generally more deaths per thousand the more cases there are, but we can also see that there are many countries with very large residuals. Some countries have much more deaths per thousand despite not having as many cases as others. Also, the model over-predicts the deaths per thousand for a large cluster of countries in the bottom-left corner. 
+
+## Conclusion and Biases
+
+From all this we can see that the cases per thousand people has an important effect on the number of deaths, but it is also clear that there are more factors at play. It is likely that the state of hospitals and number of doctors/nurses is extremely important for determining how many deaths occur. It is also possible that the cases are underreported due to many people being stuck at home, or being asymptomatic. 
+
+These other factors that are not included in this dataset are good to keep in mind in order to avoid prescribing the issue as simply having to do with the number of cases. 
+
+```{r session}
+
+sessionInfo()
+
+```
